@@ -21,6 +21,11 @@
 
 ---
 
+> [!IMPORTANT]
+> **🟢 This is the active GSSoC project repo — open all issues and PRs here only.**
+
+---
+
 > A production-ready recommender fusing **Content-Based Filtering (TF-IDF)**, **Collaborative Filtering (SVD)**, and **NLP Sentiment Analysis (VADER)** with a tunable weighted scoring engine — backed by Supabase PostgreSQL, served via FastAPI, and built to be **dataset-agnostic by design**.
 
 ```
@@ -154,7 +159,7 @@ hybrid-recommender/
 
 ```bash
 # 1 — Clone & install
-git clone https://github.com/leonagoel/hybrid-recommender.git
+git clone https://github.com/Bhumi1701/hybrid-recommender.git
 cd hybrid-recommender
 pip install -r requirements.txt
 ```

@@ -35,6 +35,7 @@ const state = {
     selectedSearchIdx: -1,
     isAuthSignUp: false,
     modelReady: false,
+    compareItems: [],
 };
 
 // ── DOM Elements ────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ async function handleSearch(query) {
     state.searchTimer = setTimeout(async () => {
         try {
             const data = await API.get(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
-            state.searchResults = data.results || [];
+            state.searchResults = data.items || [];
             state.selectedSearchIdx = -1;
             renderSearchDropdown(state.searchResults, query);
         } catch {
@@ -353,7 +354,7 @@ async function loadProducts(append = false) {
 
     try {
         const data = await API.get(`/api/search?q=&limit=${state.perPage}&offset=${(state.page - 1) * state.perPage}`);
-        const products = data.results || [];
+        const products = data.items || [];
         state.totalProducts = data.total || products.length;
 
         if (!append) {
@@ -378,7 +379,7 @@ async function loadSearchResults(query) {
 
     try {
         const data = await API.get(`/api/search?q=${encodeURIComponent(query)}&limit=40`);
-        const products = data.results || [];
+        const products = data.items || [];
         els.skeletonLoader.hidden = true;
         els.productCount.textContent = `${products.length} results`;
         state.products = [];
@@ -417,10 +418,22 @@ function renderProducts(products, append) {
                 </div>
             </div>
             <div class="product-card__actions">
-                <button class="btn--add-cart" data-title="${p.title}">
-                    Get Recommendations
-                </button>
-            </div>
+
+    <button class="btn--add-cart" data-title="${p.title}">
+        Get Recommendations
+    </button>
+
+    <div style="margin-top:10px;">
+        <label style="font-size:13px;">
+            <input
+                type="checkbox"
+                onchange="toggleCompare('${p.title}', this)"
+            />
+            Compare
+        </label>
+    </div>
+
+</div>
         `;
 
         // Click → get recommendations
@@ -654,3 +667,111 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+async function toggleCompare(item, checkbox) {
+
+    if (checkbox.checked) {
+
+        if (state.compareItems.length >= 3) {
+            toast('Maximum 3 products allowed', 'error');
+            checkbox.checked = false;
+            return;
+        }
+
+        state.compareItems.push(item);
+
+    } else {
+
+        state.compareItems =
+            state.compareItems.filter(i => i !== item);
+    }
+
+    if (state.compareItems.length >= 2) {
+        await loadComparison();
+    } else {
+        hideComparison();
+    }
+}
+
+async function loadComparison() {
+
+    const query =
+        encodeURIComponent(state.compareItems.join(','));
+
+    const data =
+        await API.get(`/api/compare?items=${query}`);
+
+    renderComparison(data.items || []);
+}
+
+function renderComparison(products) {
+
+    const panel =
+        document.getElementById('compare-panel');
+
+    const content =
+        document.getElementById('compare-content');
+
+    const bestRating =
+        Math.max(...products.map(p => p.rating));
+
+    const bestSentiment =
+        Math.max(...products.map(p => p.sentiment));
+
+    const bestHybrid =
+        Math.max(...products.map(p => p.hybrid_score));
+
+    content.innerHTML = `
+        <table class="compare-table">
+
+            <tr>
+                <th>Metric</th>
+                ${products.map(p => `<th>${p.title}</th>`).join('')}
+            </tr>
+
+            <tr>
+                <td>Rating</td>
+                ${products.map(p => `
+                    <td class="${p.rating === bestRating ? 'winner' : ''}">
+                        ${p.rating}
+                    </td>
+                `).join('')}
+            </tr>
+
+            <tr>
+                <td>Sentiment</td>
+                ${products.map(p => `
+                    <td class="${p.sentiment === bestSentiment ? 'winner' : ''}">
+                        ${p.sentiment}
+                    </td>
+                `).join('')}
+            </tr>
+
+            <tr>
+                <td>Category</td>
+                ${products.map(p => `
+                    <td>${p.category}</td>
+                `).join('')}
+            </tr>
+
+            <tr>
+                <td>Hybrid Score</td>
+                ${products.map(p => `
+                    <td class="${p.hybrid_score === bestHybrid ? 'winner' : ''}">
+                        ${p.hybrid_score}
+                    </td>
+                `).join('')}
+            </tr>
+
+        </table>
+    `;
+
+    panel.classList.add('active');
+}
+
+function hideComparison() {
+
+    document
+        .getElementById('compare-panel')
+        .classList.remove('active');
+}

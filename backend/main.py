@@ -89,69 +89,41 @@ def status():
 
 
 # ── Search (PostgreSQL FTS) ─────────────────────────────────────────
-
 @app.get("/api/search")
-def search_items(
-    q: str = "",
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    """
-    Search products using PostgreSQL full-text search.
-    Falls back to top-rated products when query is empty.
-    """
-    sb = get_supabase()
+def search_items(q: str = "", limit: int = 8):
 
-    if q.strip():
-        try:
-            result = sb.rpc('search_products', {
-                'query_text': q.strip(),
-                'match_count': limit,
-                'offset_val': offset,
-            }).execute()
-            products = result.data or []
-        except Exception:
-            # Fallback: do a LIKE search if FTS parsing fails
-            result = sb.table('products') \
-                .select('id, title, description, category, rating, avg_sentiment, review_count') \
-                .ilike('title', f'%{q.strip()}%') \
-                .order('rating', desc=True) \
-                .limit(limit) \
-                .execute()
-            products = result.data or []
-            for p in products:
-                p['rank'] = 0.0
-    else:
-        result = sb.table('products') \
-            .select('id, title, description, category, rating, avg_sentiment, review_count') \
-            .order('rating', desc=True) \
-            .order('review_count', desc=True) \
-            .limit(limit) \
-            .offset(offset) \
-            .execute()
-        products = result.data or []
+    mock_items = [
+        {
+            "title": "iPhone 15",
+            "rating": 4.8,
+            "sentiment": 0.92,
+            "category": "Smartphone",
+            "hybrid_score": 0.95
+        },
+        {
+            "title": "Samsung Galaxy S24",
+            "rating": 4.7,
+            "sentiment": 0.89,
+            "category": "Smartphone",
+            "hybrid_score": 0.91
+        },
+        {
+            "title": "MacBook Air M3",
+            "rating": 4.9,
+            "sentiment": 0.94,
+            "category": "Laptop",
+            "hybrid_score": 0.97
+        }
+    ]
 
-    # Format response
-    results = []
-    for p in products:
-        results.append({
-            'id': p.get('id'),
-            'title': p.get('title', ''),
-            'description': str(p.get('description', ''))[:200],
-            'category': p.get('category', ''),
-            'rating': p.get('rating', 0.0),
-            'avg_sentiment': p.get('avg_sentiment', 0.0),
-            'review_count': p.get('review_count', 0),
-            'rank': p.get('rank', 0.0),
-        })
+    filtered = [
+        item for item in mock_items
+        if q.lower() in item["title"].lower()
+    ]
 
     return {
-        "results": results,
-        "total": len(results),
-        "query": q,
-        "is_fallback": not q.strip(),
+        "items": filtered[:limit]
     }
-
 
 # ── Upload + Import ─────────────────────────────────────────────────
 
@@ -441,6 +413,44 @@ def create_purchase(data: PurchaseCreate):
         'review_text': data.review_text[:1000],
     }).execute()
     return {"purchase": result.data}
+
+@app.get("/api/compare")
+def compare_products(items: str):
+
+    item_list = items.split(",")
+
+    mock_products = [
+        {
+            "title": "iPhone 15",
+            "rating": 4.8,
+            "sentiment": 0.92,
+            "category": "Smartphone",
+            "hybrid_score": 0.95
+        },
+        {
+            "title": "Samsung Galaxy S24",
+            "rating": 4.7,
+            "sentiment": 0.89,
+            "category": "Smartphone",
+            "hybrid_score": 0.91
+        },
+        {
+            "title": "MacBook Air M3",
+            "rating": 4.9,
+            "sentiment": 0.94,
+            "category": "Laptop",
+            "hybrid_score": 0.97
+        }
+    ]
+
+    results = [
+        product for product in mock_products
+        if product["title"] in item_list
+    ]
+
+    return {
+        "results": results
+    }
 
 
 # ── Frontend Serving ────────────────────────────────────────────────

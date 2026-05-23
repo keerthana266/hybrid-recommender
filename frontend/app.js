@@ -383,6 +383,11 @@ async function loadSearchResults(query) {
         els.productCount.textContent = `${products.length} results`;
         state.products = [];
         renderProducts(products, false);
+        els.productGrid.classList.remove('fade-in');
+
+        requestAnimationFrame(() => {
+        els.productGrid.classList.add('fade-in');
+        });
         els.loadMoreContainer.hidden = true;
     } catch {
         els.skeletonLoader.hidden = true;
@@ -449,6 +454,11 @@ async function loadRecommendations(title) {
     }
 
     els.recsSection.hidden = false;
+    els.recsSection.classList.remove('slide-up');
+
+        requestAnimationFrame(() => {
+    els.recsSection.classList.add('slide-up');
+    });
     els.recsStrip.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:13px;">Loading recommendations...</div>';
 
     try {

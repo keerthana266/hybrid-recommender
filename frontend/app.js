@@ -1412,61 +1412,28 @@ function setupScrollObserver() {
     state.scrollObserver.observe(els.scrollSentinel);
 }
 
-function destroyScrollObserver() {
-    if (state.scrollObserver) {
-        state.scrollObserver.disconnect();
-        state.scrollObserver = null;
-    }
-}
-
-function addToSearchHistory(query) {
-    if (!state.searchHistory) state.searchHistory = [];
-    state.searchHistory = [query, ...state.searchHistory.filter(q => q !== query)].slice(0, 10);
-    renderSearchHistory();
-}
-
-function renderSearchHistory() {
-    if (!state.searchHistory || !state.searchHistory.length) {
-        els.searchHistory.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">No search history</div>';
+// ── Search ──────────────────────────────────────────────────────────
+async function handleSearch(query) {
+    if (!query || query.length < 1) {
+        els.typingIndicator.hidden = true;
+        closeSearchDropdown();
         return;
     }
 
-    els.searchHistory.innerHTML = `
-        <div class="search-history__list">
-            ${state.searchHistory.map(query => `
-                <div class="search-history__item" data-query="${query}">
-                    <span style="font-size:14px;">🕐</span>
-                    <span>${query}</span>
-                </div>
-            `).join('')}
-        </div>
-        <button id="clear-history-btn" class="btn btn--link" style="width:100%;padding:12px;border-top:1px solid var(--border);border-radius:0;font-size:12px;">
-            Clear History
-        </button>
-    `;
-    
-    els.searchHistory.classList.add('active');
-
-    // Click history item
-    els.searchHistory.querySelectorAll('.search-history__item')
-        .forEach((el) => {
-            el.addEventListener('click', () => {
-                const query = el.dataset.query;
-                els.searchInput.value = query;
-                loadSearchResults(query);
-                handleSearch(query);
-            });
-        });
-
-    // Clear history
-    const clearBtn = document.getElementById('clear-history-btn');
-
-    if (clearBtn) {
-        clearBtn.addEventListener('click', () => {
-            state.searchHistory = [];
-            renderSearchHistory();
-        });
-    }
+    clearTimeout(state.searchTimer);
+    els.typingIndicator.hidden = false;
+    state.searchTimer = setTimeout(async () => {
+        try {
+            const data = await API.get(`/api/search?q=${encodeURIComponent(query)}&limit=8`);
+            state.searchResults = data.results || [];
+            state.selectedSearchIdx = -1;
+            renderSearchDropdown(state.searchResults, query);
+            els.typingIndicator.hidden = true;
+        } catch {
+            closeSearchDropdown();
+            els.typingIndicator.hidden = true;
+        }
+    }, 300);
 }
 
 function renderSearchDropdown(results, query) {
@@ -1628,6 +1595,9 @@ function renderProducts(products, append) {
                     <div class="product-card__rating">
                         <div class="star-rating">${renderStars(p.rating || 0)}</div>
                         <span class="rating-value">${(p.rating || 0).toFixed(1)}</span>
+                    </div>
+                    <div class="product-review-count">
+                        ${formatReviewCount(p.review_count)}
                     </div>
                     ${sentimentBadge(p.avg_sentiment || 0)}
                 </div>

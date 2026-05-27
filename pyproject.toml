@@ -15,6 +15,22 @@ exclude = [
 # Set maximum line length to 100 characters (consistent with existing codebase)
 line-length = 100
 
+[tool.ruff.lint]
+# Enable standard lint rules:
+# E/W: pycodestyle errors/warnings
+# F: Pyflakes (unused imports, variables, etc.)
+# I: isort (import sorting)
+# B: flake8-bugbear (common bug patterns)
+# C4: flake8-comprehensions (optimized list/dict comprehensions)
+# UP: pyupgrade (enforces modern Python features)
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+
+ignore = []
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["backend", "src"]
+
 [tool.ruff.format]
 # Enforce double quotes for formatting (standard Python practice)
 quote-style = "double"

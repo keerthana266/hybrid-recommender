@@ -239,8 +239,315 @@ def _apply_rate_limit(ip_address: str) -> bool:
     Applies token-bucket rate limiting dynamically.
     Optimized to handle Algorithmic Complexity DoS scenarios.
     """
-    global _request_counter
-    current_time = time.time()
+    Low‑overhead health check endpoint for component tracking.
+    Checks database (Supabase), model readiness, and cache (Redis).
+    """
+    from src.data.db import get_supabase
+    from redis import Redis
+    from redis.exceptions import RedisError
+    import os
+
+    result = {
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "components": {
+            "database": {"status": "unknown", "details": None},
+            "model": {"status": "unknown", "details": None},
+            "cache": {"status": "unknown", "details": None},
+        },
+    }
+
+    # 1. Database check (Supabase)
+    try:
+        sb = get_supabase()
+        resp = sb.table("products").select("id").limit(1).execute()
+        if resp.data is not None:
+            result["components"]["database"] = {"status": "healthy", "details": "connected"}
+        else:
+            result["components"]["database"] = {"status": "unhealthy", "details": "query returned no data"}
+            result["status"] = "degraded"
+    except Exception as e:
+        result["components"]["database"] = {"status": "unhealthy", "details": str(e)}
+        result["status"] = "degraded"
+
+    # 2. Model readiness check
+    try:
+        if models.get("ready"):
+            result["components"]["model"] = {"status": "ready", "details": "models loaded"}
+        else:
+            result["components"]["model"] = {"status": "not_ready", "details": "models not built"}
+            result["status"] = "degraded"
+    except Exception as e:
+        result["components"]["model"] = {"status": "error", "details": str(e)}
+        result["status"] = "degraded"
+
+    # 3. Cache (Redis) check
+    try:
+        redis_url = os.environ.get("REDIS_URL", "")
+        if redis_url:
+            r = Redis.from_url(redis_url, decode_responses=True)
+            if r.ping():
+                result["components"]["cache"] = {"status": "healthy", "details": "redis ping successful"}
+            else:
+                result["components"]["cache"] = {"status": "unhealthy", "details": "redis ping failed"}
+                result["status"] = "degraded"
+        else:
+            result["components"]["cache"] = {"status": "not_configured", "details": "REDIS_URL not set"}
+    except Exception as e:
+        result["components"]["cache"] = {"status": "error", "details": str(e)}
+        result["status"] = "degraded"
+
+    return result
+
+# ── API Metrics ───────────────────────────────────────────────────────
+@app.get("/api/version")
+def get_version():
+    return {
+        "version": app.version,
+        "service": app.title,
+        "status": "running",
+    }
+
+
+@app.get("/api/metrics")
+def get_api_metrics():
+    return get_response_metrics_snapshot()
+
+
+# ── Config ────────────────────────────────────────────────────────────
+@app.get("/api/config")
+def get_config():
+    return {
+        "supabase_url": os.environ.get("SUPABASE_URL", ""),
+        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
+    }
+
+
+# ── Status ────────────────────────────────────────────────────────────
+@app.get("/api/status")
+def status():
+    return {
+        "status": "healthy",
+        "model_ready": models["ready"],
+        "message": "Hybrid Recommender API running",
+    }
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────
+@app.get("/api/dashboard")
+def dashboard(request: Request):
+    _require_admin_access(request)
+    sb = get_supabase()
+    try:
+        product_count = sb.table('products').select('id', count='exact').limit(0).execute().count or 0
+    except Exception as e:
+        logger.warning("Dashboard: product count failed: %s", e)
+        product_count = 0
+
+    try:
+        interaction_count = sb.table('purchases').select('id', count='exact').limit(0).execute().count or 0
+    except Exception as e:
+        logger.warning("Dashboard: interaction count failed: %s", e)
+        interaction_count = 0
+
+    total_users = 0
+    purchase_counts = Counter()
+
+    try:
+        user_result = sb.rpc('get_total_users').execute()
+        total_users = user_result.data or 0
+
+        top_products_result = sb.rpc('get_top_product_counts').execute()
+        purchase_counts = Counter({
+            row['product_id']: row['interaction_count']
+            for row in (top_products_result.data or [])
+        })
+    except Exception as e:
+        logger.warning("Dashboard error: %s", e)
+
+    avg_recommendation_score = 0.0
+    avg_sentiment_score = 0.0
+    try:
+        prod_stats = sb.table('products').select('rating, avg_sentiment').limit(50000).execute().data or []
+        ratings = [float(p['rating']) for p in prod_stats if p.get('rating') not in (None, 0)]
+        sentiments = [float(p['avg_sentiment']) for p in prod_stats if p.get('avg_sentiment') is not None]
+        if ratings:
+            avg_recommendation_score = round(sum(ratings) / len(ratings), 4)
+        if sentiments:
+            avg_sentiment_score = round(sum(sentiments) / len(sentiments), 4)
+    except Exception as e:
+        logger.warning("Dashboard: averages query failed: %s", e)
+
+    top_products = []
+    try:
+        if purchase_counts:
+            top_ids = [pid for pid, _ in purchase_counts.most_common(5)]
+            prod_result = sb.table('products').select('id, title, category, rating').in_('id', top_ids).execute().data or []
+            prod_map = {p['id']: p for p in prod_result}
+            for pid in top_ids:
+                p = prod_map.get(pid)
+                if p:
+                    top_products.append({
+                        'id': p['id'], 'title': p.get('title', ''),
+                        'category': p.get('category', ''),
+                        'rating': round(float(p.get('rating', 0) or 0), 2),
+                        'interactions': purchase_counts[pid],
+                    })
+        if not top_products:
+            fallback = sb.table('products').select('id, title, category, rating').order('rating', desc=True).limit(5).execute().data or []
+            for p in fallback:
+                top_products.append({
+                    'id': p['id'], 'title': p.get('title', ''),
+                    'category': p.get('category', ''),
+                    'rating': round(float(p.get('rating', 0) or 0), 2),
+                    'interactions': 0,
+                })
+    except Exception as e:
+        logger.warning("Dashboard: top products query failed: %s", e)
+
+    return {
+        "total_products": product_count,
+        "total_users": total_users,
+        "total_interactions": interaction_count,
+        "avg_recommendation_score": avg_recommendation_score,
+        "avg_sentiment_score": avg_sentiment_score,
+        "top_5_recommended_products": top_products,
+        "model_last_trained": models.get("last_trained_at"),
+    }
+
+
+# ── Search ────────────────────────────────────────────────────────────
+@app.get("/api/search")
+def search_items(
+    request: Request,
+    response: Response,
+    q: str = "",
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
+    sort: str = Query(
+        "relevance",
+        pattern="^(relevance|price-low|price-high|rating)$",
+    ),
+):
+    query = _normalize_search_query(q)
+    rate_limited = _apply_rate_limit(
+        request,
+        response,
+        scope="search",
+        limit_env="RATE_LIMIT_SEARCH_PER_MIN",
+        default_limit=60,
+    )
+    if rate_limited is not None:
+        return rate_limited
+
+    cache_key = _cache_key("search", query, limit, offset, sort)
+    cached = _get_cached_response(cache_key)
+    if cached is not None:
+        _set_cache_headers(response, "HIT")
+        return cached
+
+    is_fuzzy_fallback = False
+
+
+    try:
+        sb = get_supabase()
+
+        if query:
+            try:
+                # 1. Attempt standard Full-Text Search (FTS) first
+                result = sb.rpc('search_products', {
+                    'query_text': query,
+                    'match_count': limit,
+                    'offset_val': offset,
+                }).execute()
+    
+                products = result.data or []
+    
+            except Exception as e:
+                logger.warning(
+                    "Full-text search failed for query '%s': %s",
+                    query.strip(),
+                    e
+                )
+    
+                # Fallback: LIKE search
+                result = sb.table('products') \
+                    .select('id, title, description, category, rating, avg_sentiment, review_count, reviews') \
+                    .ilike('title', f'%{query.strip()}%') \
+                    .order('rating', desc=True) \
+                    .limit(limit) \
+                    .execute()
+    
+                products = result.data or []
+    
+            # 2. Fuzzy fallback
+            if len(products) < 3:
+                is_fuzzy_fallback = True
+    
+                fuzzy_res = sb.rpc('fuzzy_search_products', {
+                    'q': query,
+                    'threshold': 0.3
+                }).execute()
+    
+                products = fuzzy_res.data or []
+    
+        else:
+            query_builder = sb.table('products').select(
+                'id, title, description, category, rating, avg_sentiment, review_count, metadata'
+            )
+    
+            if sort == "rating":
+                query_builder = query_builder.order('rating', desc=True)
+            else:
+                query_builder = query_builder.order('rating', desc=True) \
+                .order('review_count', desc=True)
+    
+            result = query_builder.limit(limit).offset(offset).execute()
+            products = result.data or []
+    
+        except Exception as e:
+            logger.warning("Search fallback to mock products: %s", e)
+            products = MOCK_PRODUCTS
+
+        if query:
+            query_lower = query.lower()
+
+            products = [
+                p for p in products
+                if query_lower in str(p.get('title', '')).lower()
+                or query_lower in str(p.get('description', '')).lower()
+                or query_lower in str(p.get('category', '')).lower()
+            ]
+
+    for p in products:
+        p['rank'] = 0.0
+
+
+    # Format response
+    results = []
+    
+    for p in products:
+    
+        raw_sentiment = p.get('avg_sentiment', 0.0)
+        reviews = p.get('reviews', [])
+    
+        # Newly added products may still have the default
+        # sentiment value before the NLP batch pipeline runs.
+        # Recompute dynamically so the UI never shows misleading 0.0.
+        if raw_sentiment == 0.0 and reviews:
+            try:
+                from nlp_engine import compute_product_sentiment
+    
+                computed_sentiment = compute_product_sentiment(reviews)
+    
+                sentiment_value = (
+                    computed_sentiment
+                    if computed_sentiment is not None
+                    else "N/A"
+                )
+    
+            except Exception:
+                sentiment_value = "N/A"
     
     with _rate_limit_lock:
         bucket = _rate_limit_buckets.get(ip_address)

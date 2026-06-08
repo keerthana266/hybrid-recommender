@@ -21,6 +21,7 @@ from src.model.validation import validate_recommendations
 from src.model.recommendation_history import history_tracker
 from src.model.causal_config import CausalConfig
 from src.model.causal_model import CausalDebiaser
+from src.model.validation import validate_recommendations
 
 
 def bayesian_rating(rating, review_count, global_avg=3.0, min_votes=10):

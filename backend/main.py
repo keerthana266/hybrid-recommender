@@ -2396,6 +2396,7 @@ def update_weights(
 @app.get("/api/items")
 def list_items(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100)):
     sb = get_supabase()
+    limit = per_page
     offset = (page - 1) * limit
     result = sb.table('products') \
         .select('id, title, description, category, rating, avg_sentiment, review_count, reviews') \

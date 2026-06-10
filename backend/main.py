@@ -117,9 +117,42 @@ app = FastAPI(title="Hybrid Recommender API", version="3.0")
 # Register routers
 app.include_router(recommend.router, prefix="/api")
 
-# 🚀 DEGRADED MODE TELEMETRY TRACKER GLOBALS
-_model_degraded = False
-_model_degraded_reason: Optional[str] = None
+# ── OpenAPI CSRF header dependency ────────────────────────────────────
+# WHY a Depends() instead of just relying on the middleware?
+#
+# The CSRFMiddleware enforces the token at the ASGI level — it never
+# touches the OpenAPI schema that FastAPI builds from route signatures.
+# Swagger UI only renders parameters that appear in the schema, so the
+# X-CSRF-Token field is invisible to users testing the API interactively.
+#
+# This dependency solves that purely at the documentation layer:
+#   - It declares X-CSRF-Token as a required header parameter on every
+#     route that includes Depends(csrf_header_dep).
+#   - FastAPI adds it to the OpenAPI spec → Swagger UI renders the field.
+#   - The function body does nothing (returns None) because the middleware
+#     has already validated the token before the route handler runs.
+#   - No double-validation, no logic duplication.
+#
+# The `alias="X-CSRF-Token"` preserves the canonical mixed-case header
+# name in the OpenAPI spec so Swagger UI labels it correctly, even though
+# Starlette lowercases all incoming headers internally.
+async def csrf_header_dep(
+    x_csrf_token: str = Header(
+        ...,
+        alias="X-CSRF-Token",
+        description=(
+            "CSRF token obtained from **GET /api/csrf-token**. "
+            "Required on all state-mutating requests (POST / PUT / PATCH / DELETE). "
+            "Must match the value stored in the `csrftoken` cookie."
+        ),
+    ),
+) -> None:
+    """Declares X-CSRF-Token in OpenAPI. Enforcement is done by CSRFMiddleware."""
+    # The middleware has already validated the token before this runs.
+    # This function exists solely to make the header visible in Swagger UI.
+
+# ── App ──────────────────────────────────────────────────────────────
+app = FastAPI(title="Hybrid Recommender API", version="3.0")
 
 @app.on_event("startup")
 def download_nltk_assets():

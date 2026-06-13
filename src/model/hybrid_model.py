@@ -209,7 +209,8 @@ class HybridRecommender:
             'beta': self.beta,
             'gamma': self.gamma,
             'delta': self.delta,
-    }
+        }
+
 
     def select_bandit_arm(self):
         import random
@@ -270,7 +271,7 @@ class HybridRecommender:
     def update_bandit_reward(self, arm_id, reward):
         self.arm_counts[arm_id] += 1
         self.arm_rewards[arm_id] += reward
-        return {'alpha': self.alpha, 'beta': self.beta, 'gamma': self.gamma, 'delta': self.delta}
+
 
     # ------------------------- fairness helpers -------------------------
     def set_fairness(self, enabled=None, key=None, max_share=None):

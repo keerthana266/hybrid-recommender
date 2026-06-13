@@ -237,4 +237,3 @@ class ContentRecommender:
                 "content_score": 0.0
             })
         return results
-
